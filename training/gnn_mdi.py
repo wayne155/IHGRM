@@ -9,6 +9,8 @@ from utils.plot_utils import plot_curve, plot_sample
 from utils.utils import build_optimizer, get_known_mask, mask_edge
 from training.gae import *
 
+import wandb
+
 def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
     gae_net = VGAE(64,128,32,F.relu,True).to(device)
     model = get_gnn(data, args).to(device)
@@ -196,6 +198,14 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
                 print('test rmse: ', test_rmse)
                 print('test l1: ', test_l1)
 
+            if args.use_wandb:
+                wandb.log({
+                    "train_loss":train_loss,
+                    "at_epoch":epoch,
+                    "test_rmse":test_rmse,
+                    "test_l1":test_l1,
+                })
+            
             Train_loss.append(train_loss)
             Test_rmse.append(test_rmse)
             Test_l1.append(test_l1)

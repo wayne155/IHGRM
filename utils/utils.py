@@ -107,7 +107,7 @@ def construct_missing_X_from_edge_index(train_edge_index, df):
     return data_complete, data_incomplete
 
 # get gpu usage
-def get_gpu_memory_map():
+def get_gpu_memory_map(t='used'):
     """Get the current gpu usage.
 
     Returns
@@ -116,12 +116,21 @@ def get_gpu_memory_map():
         Keys are device ids as integers.
         Values are memory usage as integers in MB.
     """
-    result = subprocess.check_output(
-        [
-            'nvidia-smi', '--query-gpu=memory.used',
-            '--format=csv,nounits,noheader'
-        ], encoding='utf-8')
-    # Convert lines into a dictionary
+    if t == 'used':
+        result = subprocess.check_output(
+            [
+                'nvidia-smi', '--query-gpu=memory.used',
+                '--format=csv,nounits,noheader'
+            ], encoding='utf-8')
+        # Convert lines into a dictionary
+    elif t == 'free':
+        result = subprocess.check_output(
+            [
+                'nvidia-smi', '--query-gpu=memory.free',
+                '--format=csv,nounits,noheader'
+            ], encoding='utf-8')
+        # Convert lines into a dictionary
+        
     gpu_memory = np.array([int(x) for x in result.strip().split('\n')])
     # gpu_memory_map = dict(zip(range(len(gpu_memory)), gpu_memory))
     return gpu_memory
@@ -136,6 +145,7 @@ def auto_select_gpu(memory_threshold = 7000, smooth_ratio=200, strategy='greedy'
         cuda = str(np.random.choice(len(gpu_prob), p=gpu_prob))
         print('GPU select prob: {}, Select GPU {}'.format(gpu_prob, cuda))
     elif strategy == 'greedy':
-        cuda = np.argmin(gpu_memory_raw)
+        gpu_memory_raw = get_gpu_memory_map('free') + 10
+        cuda = np.argmax(gpu_memory_raw)
         print('GPU mem: {}, Select GPU {}'.format(gpu_memory_raw[cuda], cuda))
     return cuda
