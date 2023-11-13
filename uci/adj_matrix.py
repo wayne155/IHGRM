@@ -26,6 +26,14 @@ def get_obob_adj_matrix(df_X, edge_index):
     adj_mat = sp.csr_matrix((np.ones_like(row), (row, col)), shape=(df_X.shape[0], df_X.shape[0]))
     return adj_mat
 
+def get_obob_fr_adj_matrix(df_X, edge_index):
+    row = edge_index[0]
+    col = edge_index[1]
+    adj_mat = sp.csr_matrix((np.ones_like(row), (row, col)), shape=(df_X.shape[0]+df_X.shape[1], df_X.shape[0]+df_X.shape[1]))
+    return adj_mat
+
+
+
 def normalize_adj_(adj):
     adj_ = sp.coo_matrix(adj)
     adj_.setdiag(1)

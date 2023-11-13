@@ -1,6 +1,11 @@
 .vscode
 # Byte-compiled / optimized / DLL files
 __pycache__/
+./uci/__pycache__
+./uci/test/
+./uci/mdi_results/
+cmd_input.txt
+wandb
 *.py[cod]
 *$py.class
 

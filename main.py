@@ -54,7 +54,7 @@ def config_wandb(
 
 def main():
     parser = argparse.ArgumentParser()# domain
-    parser.add_argument('--model_type', type=str, default='IGRM')
+    parser.add_argument('--model_type', type=str, default='IHGRM')
     parser.add_argument('--model_types', type=str, default='EGSAGE_EGSAGE_EGSAGE')
     parser.add_argument('--domain', type=str, default='uci')
     parser.add_argument('--post_hiddens', type=str, default=None,) # default to be 1 hidden of node_dim

@@ -289,8 +289,14 @@ def get_data(df_X, df_y, node_mode, train_edge_prob, split_sample_ratio, split_b
         add_edge_start, add_edge_end = get_rules_edge_with_mask(rules_other,features)
 
     elif initial == 'random':
+        # observation only
+        random_all_edges = np.floor(1.0 * len(features) + 1.0*len(features.columns))
+        add_all_edge_start, add_all_edge_end = get_edge_with_random(features,confidence,random_all_edges)
+        
+        # observation only
         random_edges = np.floor(1.0 * len(features))
         add_edge_start, add_edge_end = get_edge_with_random(features,confidence,random_edges)
+
         # from sklearn.metrics.pairwise import cosine_similarity
         # m1 = np.mat(df_X)
         # cos = cosine_similarity(m1)
@@ -350,9 +356,21 @@ def get_data(df_X, df_y, node_mode, train_edge_prob, split_sample_ratio, split_b
         obob_edge_start = add_edge_start+add_edge_end
         obob_edge_end = add_edge_end+add_edge_start
         obob_edge_index = torch.tensor([obob_edge_start,obob_edge_end])
+        
+        obob_fr_edge_start = add_all_edge_start + add_all_edge_end
+        obob_fr_edge_end = add_all_edge_end + add_all_edge_start
+        obob_fr_edge_index = torch.tensor([obob_fr_edge_start,obob_fr_edge_end])
+
+        
     elif initial == 'cos' or initial == 'cos_complete':
         obob_edge_index = adj_sampled
 
+    # observation feature matrix
+    obob_fr_adj_train = get_obob_fr_adj_matrix(df_X, obob_fr_edge_index)
+    obob_fr_adj_orig = scipysp_to_pytorchsp(obob_fr_adj_train).to_dense()  # 边的矩阵的torch.tensor表示
+    obob_fr_adj_norm = normalize_adj_(obob_fr_adj_train)
+
+    # observation matrix
     obob_adj_train = get_obob_adj_matrix(df_X, obob_edge_index)
     obob_adj_orig = scipysp_to_pytorchsp(obob_adj_train).to_dense()  # 边的矩阵的torch.tensor表示
     obob_adj_norm = normalize_adj_(obob_adj_train)
@@ -378,6 +396,11 @@ def get_data(df_X, df_y, node_mode, train_edge_prob, split_sample_ratio, split_b
             # obob_adj_train = obob_adj_train,
             obob_adj_norm = obob_adj_norm,
             obob_adj_orig=obob_adj_orig,
+            
+            obob_fr_edge_index=obob_fr_edge_index,
+            obob_fr_adj_norm = obob_fr_adj_norm,
+            obob_fr_adj_orig=obob_fr_adj_orig,
+
             mask=train_edge_mask
             )
 

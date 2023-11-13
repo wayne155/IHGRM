@@ -9,6 +9,7 @@ from models.egcn import EGCNConv
 from models.egsage import EGraphSage
 from utils.utils import get_activation
 from models.psage import PGraphSage
+from models.weighted_han import WeightedHAN
 
 def get_gnn(data, args):
     model_types = args.model_types.split('_')
@@ -56,7 +57,8 @@ class GNNStack(torch.nn.Module):
 
         self.edge_update_mlps = self.build_edge_update_mlps(node_dim, edge_input_dim, edge_dim, self.gnn_layer_num, activation)
         
-        self.sage = self.build_friend_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
+        # self.sage = self.build_friend_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
+        self.weight_han = self.build_heterogeneous_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
 
 
     def build_friend_network_convs(self, input_dim, output_dim, activation, normalize_embs, aggr):
@@ -65,6 +67,9 @@ class GNNStack(torch.nn.Module):
         convs.append(conv)
         return convs
 
+    def build_heterogeneous_network_convs(self, input_dim, output_dim, activation, normalize_embs, aggr):
+        conv = WeightedHAN(input_dim,input_dim,output_dim, n_layers=1)
+        return conv
 
     def build_node_post_mlp(self, input_dim, output_dim, hidden_dims, dropout, activation):
         if 0 in hidden_dims:
@@ -130,6 +135,7 @@ class GNNStack(torch.nn.Module):
         return edge_attr
 
     def forward(self, x, edge_attr, edge_index):
+        # x : (N+M x M) node emebedding
         if self.concat_states:
             concat_x = []
         for l,(conv_name,conv) in enumerate(zip(self.model_types,self.convs)):
@@ -144,9 +150,8 @@ class GNNStack(torch.nn.Module):
             x = torch.cat(concat_x, 1)
         return x
 
-    def F_augmentation(self, x, edge_attr, edge_index):
-        for l, conv in enumerate(self.sage):
-            x = conv(x, edge_attr, edge_index)
+    def F_augmentation(self, x, edge_attr, edge_index, num_obs):
+        x = self.weight_han(x, edge_attr, edge_index,num_obs)
         return x
 
 
