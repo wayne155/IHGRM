@@ -28,8 +28,6 @@ class WeightedHAN(nn.Module):
         act="relu",
         n_first=True,
         act_first=False,
-        eps=0.9,
-        edge_weight=True,
         conv_type='all', # homo, hetero
         **kwargs
     ):
@@ -47,7 +45,6 @@ class WeightedHAN(nn.Module):
         self.dropout = dropout
         self.act = activation_resolver.make(act)
         self.act_first = act_first
-        self.eps = eps
 
         self.out_channels = hidden_channels
 
@@ -70,9 +67,11 @@ class WeightedHAN(nn.Module):
         
         for i in range(n_layers - 2):
             self.convs.append(self.init_conv(self.hidden_channels,hidden_channels))
-        
-        self.convs.append(self.init_conv(self.in_channels,out_channels))
-        
+        if n_layers==1:
+            self.convs.append(self.init_conv(self.in_channels,out_channels))
+        else:
+            self.convs.append(self.init_conv(self.in_channels,hidden_channels))
+            
         # self.norms = None
         # if norm is not None:
         #     self.norms = nn.ModuleList()
@@ -98,8 +97,8 @@ class WeightedHAN(nn.Module):
             edge_index_bi = edge_index
             edge_weight_bi = edge_attr
             # TODO: edge may be empty, please ensure no empty edges here
-            assert ((edge_index_bi[0] < self.num_observations) 
-                & (edge_index_bi[1] < self.num_observations)).any() == True
+            # assert ((edge_index_bi[0] < self.num_observations) 
+            #     & (edge_index_bi[1] < self.num_observations)).any() == True
             
             oo_index = (edge_index_bi[0] < self.num_observations)  & (edge_index_bi[1] < self.num_observations)
             ff_index = (edge_index_bi[0] >= self.num_observations) & (edge_index_bi[1] >= self.num_observations)

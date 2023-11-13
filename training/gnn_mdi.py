@@ -114,8 +114,14 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
 
     obob_edge_index = data.obob_edge_index.to(device)
     obob_adj_norm = data.obob_adj_norm.to(device)
+    
+    
+    obob_fr_edge_index = data.obob_fr_edge_index.to(device)
+    obob_fr_adj_norm = data.obob_fr_adj_norm.to(device)
+
     num_ob = data.x.shape[0]-data.x.shape[1]
     obob_edge_weight = None
+    obob_fr_edge_weight = None
 
     reconstrct_frequency = 100
     for epoch in range(args.epochs):
@@ -129,20 +135,19 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
         known_mask = get_known_mask(args.known, int(train_edge_attr.shape[0] / 2)).to(device) 
         double_known_mask = torch.cat((known_mask, known_mask), dim=0)
         known_edge_index, known_edge_attr = mask_edge(train_edge_index, train_edge_attr, double_known_mask, True)
-        x_embd = model(x, known_edge_attr, known_edge_index)
-
+        x_embd = model(x, known_edge_attr, known_edge_index, num_ob)
         if epoch % reconstrct_frequency == 0:   # reconstruct friend network
-            adj_logits = gae_net(obob_adj_norm, x_embd[:num_ob].clone())
+            # adj_logits = gae_net(obob_adj_norm, x_embd[:num_ob].clone())
+            adj_logits = gae_net(obob_fr_adj_norm, x_embd.clone())
             adj_new, _, edge_probs = sample_adj(adj_logits)   
-            obob_edge_weight = edge_probs[adj_new.bool()]
+            obob_fr_edge_weight = edge_probs[adj_new.bool()]
             adj_new = torch.nonzero(adj_new).T
-            obob_edge_index = adj_new
+            obob_fr_edge_index = adj_new
         elif (epoch-1) % reconstrct_frequency == 0:
-            obob_edge_weight = obob_edge_weight.detach()
+            obob_fr_edge_weight = obob_fr_edge_weight.detach()
         
         # friend network GRL
-        x_sage = model.F_augmentation(x_embd[:num_ob],obob_edge_weight,obob_edge_index)
-        x_embd[:num_ob] = x_sage
+        x_embd = model.F_augmentation(x_embd,obob_fr_edge_weight,obob_fr_edge_index,num_ob)
         x_embd = model.node_post_mlp(x_embd)
             
         pred = impute_model([x_embd[train_edge_index[0]], x_embd[train_edge_index[1]]])
@@ -172,10 +177,10 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
         impute_model.eval()
         gae_net.eval()
         with torch.no_grad():
-            x_embd = model(x, test_input_edge_attr, test_input_edge_index)
-            x_sage = model.F_augmentation(x_embd[:num_ob],obob_edge_weight,obob_edge_index)
-            x_embd[:num_ob] = x_sage
+            x_embd = model(x, test_input_edge_attr, test_input_edge_index, num_ob)
+            x_embd = model.F_augmentation(x_embd,obob_fr_edge_weight,obob_fr_edge_index,num_ob)
             x_embd = model.node_post_mlp(x_embd)
+
             pred = impute_model([x_embd[test_edge_index[0], :], x_embd[test_edge_index[1], :]])
             if hasattr(args,'ce_loss') and args.ce_loss:
                 pred_test = class_values[pred[:int(test_edge_attr.shape[0] / 2)].max(1)[1]]
