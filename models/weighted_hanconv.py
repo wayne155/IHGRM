@@ -144,7 +144,6 @@ class WeightedHANConv(MessagePassing):
     def message(self, x_j: Tensor, alpha_i: Tensor, alpha_j: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
                 size_i: Optional[int],edge_weight:Optional[Tensor]) -> Tensor:
-        import pdb;pdb.set_trace()
         alpha = alpha_j + alpha_i
         if edge_weight is not None:
             alpha = alpha * edge_weight.unsqueeze(-1)

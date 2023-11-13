@@ -98,8 +98,8 @@ class WeightedHAN(nn.Module):
             edge_index_bi = edge_index
             edge_weight_bi = edge_attr
             # TODO: edge may be empty, please ensure no empty edges here
-            assert ((edge_index_bi[0] < self.num_observations) 
-                & (edge_index_bi[1] < self.num_observations)).any() == True
+            # assert ((edge_index_bi[0] < self.num_observations) 
+            #     & (edge_index_bi[1] < self.num_observations)).any() == True
             
             oo_index = (edge_index_bi[0] < self.num_observations)  & (edge_index_bi[1] < self.num_observations)
             ff_index = (edge_index_bi[0] >= self.num_observations) & (edge_index_bi[1] >= self.num_observations)

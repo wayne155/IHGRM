@@ -9,7 +9,6 @@ from utils.plot_utils import plot_curve, plot_sample
 from utils.utils import build_optimizer, get_known_mask, mask_edge
 from training.gae import *
 
-# torch.autograd.set_detect_anomaly(True)
 import wandb
 
 def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
@@ -37,22 +36,13 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
         model = torch.load(load_path+'model'+args.transfer_extra+'.pt',map_location=device)
         impute_model = torch.load(load_path+'impute_model'+args.transfer_extra+'.pt',map_location=device)
 
-    
-    # model_parameters= model.parameters()
-    model_gnn_parameters= list(model.convs.parameters()) + list(model.edge_update_mlps.parameters())
-    agumentation_parameters= model.weight_han.parameters()
-    node_post_parameters= model.node_post_mlp.parameters()
-    impute_model_parameters= impute_model.parameters()
     trainable_parameters = list(model.parameters()) \
                         + list(impute_model.parameters())
     gae_opt = torch.optim.Adam(gae_net.parameters(),lr=0.001)
     print('ep net trainable_parameters:', len(list(gae_net.parameters())))
     print("total trainable_parameters: ",len(trainable_parameters))
     # build optimizer
-    model_gnn_scheduler, model_gnn_opt = build_optimizer(args, model_gnn_parameters)
-    impute_scheduler, impute_opt = build_optimizer(args, impute_model_parameters)
-    aug_scheduler, aug_opt = build_optimizer(args, agumentation_parameters)
-    node_post_scheduler, node_post_opt = build_optimizer(args, node_post_parameters)
+    scheduler, opt = build_optimizer(args, trainable_parameters)
 
     # train
     Train_loss = []
@@ -124,33 +114,23 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
 
     obob_edge_index = data.obob_edge_index.to(device)
     obob_adj_norm = data.obob_adj_norm.to(device)
-    obob_edge_weight = None
+    
     
     obob_fr_edge_index = data.obob_fr_edge_index.to(device)
     obob_fr_adj_norm = data.obob_fr_adj_norm.to(device)
-    
+
     num_ob = data.x.shape[0]-data.x.shape[1]
+    obob_edge_weight = None
+    obob_fr_edge_weight = None
 
     reconstrct_frequency = 100
     for epoch in range(args.epochs):
-        
         model.train()
         impute_model.train()
         gae_net.train()
+        opt.zero_grad()
+        gae_opt.zero_grad()
         
-
-        for param in gae_net.parameters():
-            param.requires_grad = True
-        for param in model.convs.parameters():
-            param.requires_grad = True
-        for param in model.edge_update_mlps.parameters():
-            param.requires_grad = True
-
-        
-        
-        
-        # gae , model stage
-
         # bipartite GRL
         known_mask = get_known_mask(args.known, int(train_edge_attr.shape[0] / 2)).to(device) 
         double_known_mask = torch.cat((known_mask, known_mask), dim=0)
@@ -160,12 +140,17 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
             # adj_logits = gae_net(obob_adj_norm, x_embd[:num_ob].clone())
             adj_logits = gae_net(obob_fr_adj_norm, x_embd.clone())
             adj_new, _, edge_probs = sample_adj(adj_logits)   
-            obob_fr_edge_weight = edge_probs[adj_new.bool()]
+            obob_edge_weight = edge_probs[adj_new.bool()]
             adj_new = torch.nonzero(adj_new).T
-            obob_fr_edge_index = adj_new
+            obob_edge_index = adj_new
         elif (epoch-1) % reconstrct_frequency == 0:
-            obob_fr_edge_weight = obob_fr_edge_weight.detach()
-
+            obob_edge_weight = obob_fr_edge_weight.detach()
+        
+        # friend network GRL
+        x_han = model.F_augmentation(x_embd,obob_fr_edge_weight,obob_fr_edge_index,num_ob)
+        # x_embd[:num_ob] = x_sage
+        x_embd = model.node_post_mlp(x_han)
+            
         pred = impute_model([x_embd[train_edge_index[0]], x_embd[train_edge_index[1]]])
         if hasattr(args,'ce_loss') and args.ce_loss:
             pred_train = pred[:int(train_edge_attr.shape[0] / 2)]
@@ -173,133 +158,30 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
             pred_train = pred[:int(train_edge_attr.shape[0] / 2),0]
         if args.loss_mode == 1:
             pred_train[known_mask] = train_labels[known_mask]
+        label_train = train_labels
         if hasattr(args,'ce_loss') and args.ce_loss:
             loss = F.cross_entropy(pred_train,train_labels)
         else:
-            loss = F.mse_loss(pred_train, train_labels)
+            loss = F.mse_loss(pred_train, label_train)
         loss.backward()
-        impute_opt.step()
-        impute_opt.zero_grad()
+        if (epoch % reconstrct_frequency) == 0:
+            gae_opt.step()  
+        opt.step()
 
-        # import pdb;pdb.set_trace()
-
-        # friend network GRL
-        # x_han = model.F_augmentation(x_embd,obob_fr_edge_weight,obob_fr_edge_index,num_ob)
-        # x_embd[:num_ob] = x_sage
-        sample_size = 10000
-        num_edges = obob_fr_edge_index.size(1)
-        sampled_edges = []
-        
-        # 每次从边中采样500条进行传播
-        for i in range(0, num_edges, sample_size):
-            # 获取当前要采样的边的起始和结束索引
-            start_index = i
-            end_index = min(i + sample_size, num_edges)
-
-            # 根据索引切片获取采样的边和边权
-            sampled_edge_index = obob_fr_edge_index[:, start_index:end_index]
-            sampled_edge_weight = obob_fr_edge_weight[start_index:end_index]
-
-            # 将采样的边和边权添加到列表中
-            sampled_edges.append((sampled_edge_index, sampled_edge_weight))
-
-        for param in gae_net.parameters():
-            param.requires_grad = False
-        for param in model.convs.parameters():
-            param.requires_grad = False
-        for param in model.edge_update_mlps.parameters():
-            param.requires_grad = False
-
-        # gae_net.eval()
-        # model.convs.eval()
-        # model.edge_update_mlps.eval()
-        
-        for sampled_edge_index, sampled_edge_weight in sampled_edges:
-            # 在这里执行传播操作，即使用采样的边和边权进行计算
-            # x_embd = nn.Parameter(torch.ones_like(x_embd))
-            x_embd_detach = x_embd.detach()
-            sampled_edge_weight = sampled_edge_weight.detach()
-            sampled_edge_index = sampled_edge_index.detach()
-            x_embd_detach = model.F_augmentation(x_embd_detach, sampled_edge_weight, sampled_edge_index, num_ob)
-            x_embd_detach = model.node_post_mlp(x_embd_detach)
-            
-            pred = impute_model([x_embd_detach[train_edge_index[0]], x_embd_detach[train_edge_index[1]]])
-            if hasattr(args,'ce_loss') and args.ce_loss:
-                pred_train = pred[:int(train_edge_attr.shape[0] / 2)]
-            else:
-                pred_train = pred[:int(train_edge_attr.shape[0] / 2),0]
-            if args.loss_mode == 1:
-                pred_train[known_mask] = train_labels[known_mask]
-            if hasattr(args,'ce_loss') and args.ce_loss:
-                loss = F.cross_entropy(pred_train,train_labels)
-            else:
-                loss = F.mse_loss(pred_train, train_labels)
-            loss.backward()
-            aug_opt.step()
-            node_post_opt.step()
-            impute_opt.step()
-            
-            impute_opt.zero_grad()
-            aug_opt.zero_grad()
-            node_post_opt.zero_grad()
-
-            
-            train_loss = loss.item()
-
-            for param_group in node_post_opt.param_groups:
-                Lr.append(param_group['lr'])
-
-            for param_group in aug_opt.param_groups:
-                Lr.append(param_group['lr'])
-            for param_group in impute_opt.param_groups:
-                Lr.append(param_group['lr'])
-                
-            if node_post_scheduler:
-                node_post_scheduler.step(epoch)
-            if aug_scheduler:
-                aug_scheduler.step(epoch)
-            if impute_scheduler:
-                impute_scheduler.step(epoch)
-                
-                
-                
-        # if (epoch % reconstrct_frequency) == 0:
-        #     # no grad desc for model and impute model 
-        #     for param in model.weight_han.parameters():
-        #         param.requires_grad = False
-        #     for param in impute_model.parameters():
-        #         param.requires_grad = False
-        #     for param in model.node_post_mlp.parameters():
-        #         param.requires_grad = False
-
-        #     # 在这里执行传播操作，即使用采样的边和边权进行计算
-        #     x_han = model.F_augmentation(x_embd, sampled_edge_weight, sampled_edge_index, num_ob)
-        
-        #     x_embd = model.node_post_mlp(x_han)
-                
-        #     pred = impute_model([x_embd[train_edge_index[0]], x_embd[train_edge_index[1]]])
-        #     if hasattr(args,'ce_loss') and args.ce_loss:
-        #         pred_train = pred[:int(train_edge_attr.shape[0] / 2)]
-        #     else:
-        #         pred_train = pred[:int(train_edge_attr.shape[0] / 2),0]
-        #     if args.loss_mode == 1:
-        #         pred_train[known_mask] = train_labels[known_mask]
-        #     label_train = train_labels
-        #     if hasattr(args,'ce_loss') and args.ce_loss:
-        #         loss = F.cross_entropy(pred_train,train_labels)
-        #     else:
-        #         loss = F.mse_loss(pred_train, label_train)
-        #     loss.backward()
-
-        #     gae_opt.step()  
-        #     gae_opt.zero_grad()
-            
+        train_loss = loss.item()
+        if scheduler is not None:
+            scheduler.step(epoch)
+        for param_group in opt.param_groups:
+            Lr.append(param_group['lr'])
 
         model.eval()
         impute_model.eval()
         gae_net.eval()
         with torch.no_grad():
             x_embd = model(x, test_input_edge_attr, test_input_edge_index)
+            # x_sage = model.F_augmentation(x_embd[:num_ob],obob_edge_weight,obob_edge_index)
+            # x_embd[:num_ob] = x_sage
+            # x_embd = model.node_post_mlp(x_embd)
             
             x_han = model.F_augmentation(x_embd,obob_fr_edge_weight,obob_fr_edge_index,num_ob)
             x_embd = model.node_post_mlp(x_han)
@@ -364,7 +246,7 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
         title = ''
         torch.save(model, log_path + str(args.epochs) + '{}model.pt'.format(title))
         torch.save(impute_model, log_path + str(args.epochs) + '{}impute_model.pt'.format(title))
-        torch.save(obob_fr_edge_index, log_path + str(args.epochs) + '{}test_obob_fr_edge_index.pt'.format(title))
+        torch.save(obob_edge_index, log_path + str(args.epochs) + '{}test_obob_edge_index.pt'.format(title))
         torch.save(edge_probs, log_path + str(args.epochs) + '{}obob_edge_probs.pt'.format(title))
 
     # obj = objectview(obj)
