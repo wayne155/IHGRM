@@ -41,11 +41,12 @@ def group(
         return out, attn
 
 
-class WeightedHANConv(MessagePassing):
+class EWeightedHANConv(MessagePassing):
     def __init__(
         self,
         in_channels: Union[int, Dict[str, int]],
         out_channels: int,
+        edge_dim : int,
         metadata: Metadata,
         heads: int = 1,
         negative_slope=0.2,
@@ -63,14 +64,17 @@ class WeightedHANConv(MessagePassing):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.negative_slope = negative_slope
+        self.edge_dim = edge_dim
         self.metadata = metadata
         self.dropout = dropout
         self.k_lin = nn.Linear(out_channels, out_channels)
         self.q = nn.Parameter(torch.Tensor(1, out_channels))
         self.normalize_emb = normalize_emb
         self.proj = nn.ModuleDict()
+        # self.edge_proj = nn.ModuleDict()
         
         self.agg_lin_dict =  nn.ModuleDict()
+        self.edge_msg_lin =  nn.ModuleDict()
         
         for node_type, in_channels in self.in_channels.items():
             self.proj[node_type] = Linear(in_channels, out_channels)
@@ -83,6 +87,8 @@ class WeightedHANConv(MessagePassing):
             self.lin_src[edge_type] = nn.Parameter(torch.Tensor(1, heads, dim))
             self.lin_dst[edge_type] = nn.Parameter(torch.Tensor(1, heads, dim))
             self.agg_lin_dict[edge_type] =  nn.Linear(out_channels +out_channels, out_channels)
+            self.edge_msg_lin[edge_type] =  nn.Linear(out_channels*2 +edge_dim, out_channels)
+            # self.edge_proj[edge_type] =  nn.Linear(edge_dim, out_channels)
         
         self.act = get_activation(self.act_function)
         self.reset_parameters()
@@ -115,7 +121,7 @@ class WeightedHANConv(MessagePassing):
         # Iterate over edge types:
         for edge_type, edge_index in edge_index_dict.items():
             edge_weight = edge_weight_dict[edge_type]
-                
+            edge_weight = edge_weight.view(-1, H, self.edge_dim)
                 
             src_type, _, dst_type = edge_type
             edge_type = '__'.join(edge_type)
@@ -127,7 +133,7 @@ class WeightedHANConv(MessagePassing):
             alpha_dst = (x_dst * lin_dst).sum(dim=-1)
             # propagate_type: (x_dst: PairTensor, alpha: PairTensor)
             out = self.propagate(edge_index, x=(x_src, x_dst),
-                                 alpha=(alpha_src, alpha_dst),edge_weight=edge_weight, size=None, edge_type=edge_type)
+                                 alpha=(alpha_src, alpha_dst),edge_weight=edge_weight,edge_type=edge_type, size=None)
 
             out = F.relu(out)
             out_dict[dst_type].append(out)
@@ -141,16 +147,15 @@ class WeightedHANConv(MessagePassing):
 
         return out_dict, semantic_attn_dict
 
-    def message(self, x_j: Tensor, alpha_i: Tensor, alpha_j: Tensor,
+    def message(self, x_j: Tensor,x_i, alpha_i: Tensor, alpha_j: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
-                size_i: Optional[int],edge_weight:Optional[Tensor]) -> Tensor:
+                size_i: Optional[int],edge_weight:Optional[Tensor],edge_type:Optional[Tensor]) -> Tensor:
         alpha = alpha_j + alpha_i
-        if edge_weight is not None:
-            alpha = alpha * edge_weight.unsqueeze(-1)
         alpha = F.leaky_relu(alpha, self.negative_slope)
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
-        out = x_j * alpha.view(-1, self.heads, 1)
+        msg = self.edge_msg_lin[edge_type](torch.cat((x_i, x_j,edge_weight),dim=-1))
+        out = msg * alpha.view(-1, self.heads, 1)
         return out.view(-1, self.out_channels)
 
     def __repr__(self) -> str:
@@ -158,7 +163,7 @@ class WeightedHANConv(MessagePassing):
                 f'heads={self.heads})')
 
 
-    def update(self, aggr_out, x,edge_type):
+    def update(self, aggr_out, x,edge_type,edge_weight):
         # aggr_out has shape [N, out_channels]
         # x has shape [N, in_channels]
         (x_src, x_dst) = x

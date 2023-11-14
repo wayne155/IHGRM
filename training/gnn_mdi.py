@@ -8,6 +8,7 @@ from models.prediction_model import MLPNet
 from utils.plot_utils import plot_curve, plot_sample
 from utils.utils import build_optimizer, get_known_mask, mask_edge
 from training.gae import *
+from tqdm import tqdm
 
 import wandb
 
@@ -124,7 +125,7 @@ def train_gnn_mdi(data, args, log_path, device=torch.device('cpu')):
     obob_fr_edge_weight = None
 
     reconstrct_frequency = 100
-    for epoch in range(args.epochs):
+    for epoch in tqdm(range(args.epochs)):
         model.train()
         impute_model.train()
         gae_net.train()

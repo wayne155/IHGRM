@@ -9,6 +9,7 @@ from models.egcn import EGCNConv
 from models.egsage import EGraphSage
 from utils.utils import get_activation
 from models.psage import PGraphSage
+from models.eweighted_han import EWeightedHAN
 from models.weighted_han import WeightedHAN
 
 def get_gnn(data, args):
@@ -112,6 +113,8 @@ class GNNStack(torch.nn.Module):
             return EGCNConv(node_in_dim,node_out_dim,edge_dim,edge_mode)
         elif model_type == 'EGSAGE':
             return EGraphSage(node_in_dim,node_out_dim,edge_dim,activation,edge_mode,normalize_emb, aggr)
+        elif model_type == 'WeightedHAN':
+            return EWeightedHAN(node_in_dim,node_in_dim,node_out_dim,edge_dim,n_layers=1)
 
     def build_edge_update_mlps(self, node_dim, edge_input_dim, edge_dim, gnn_layer_num, activation):
         edge_update_mlps = nn.ModuleList()
@@ -134,13 +137,15 @@ class GNNStack(torch.nn.Module):
         edge_attr = mlp(torch.cat((x_i,x_j,edge_attr),dim=-1))
         return edge_attr
 
-    def forward(self, x, edge_attr, edge_index):
+    def forward(self, x, edge_attr, edge_index, num_obs):
         # x : (N+M x M) node emebedding
         if self.concat_states:
             concat_x = []
         for l,(conv_name,conv) in enumerate(zip(self.model_types,self.convs)):
-            if conv_name == 'EGCN' or conv_name == 'EGSAGE':
+            if conv_name == 'EGCN' or conv_name == 'EGSAGE'  :
                 x = conv(x, edge_attr, edge_index)
+            elif conv_name == 'WeightedHAN':
+                x = conv(x, edge_attr, edge_index, num_obs)
             else:
                 x = conv(x, edge_index)
             if self.concat_states:

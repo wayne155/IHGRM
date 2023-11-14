@@ -55,7 +55,8 @@ def config_wandb(
 def main():
     parser = argparse.ArgumentParser()# domain
     parser.add_argument('--model_type', type=str, default='IHGRM')
-    parser.add_argument('--model_types', type=str, default='EGSAGE_EGSAGE_EGSAGE')
+    parser.add_argument('--model_types', type=str, default='WeightedHAN_WeightedHAN_WeightedHAN')
+    # parser.add_argument('--model_types', type=str, default='EGSAGE_EGSAGE_EGSAGE')
     parser.add_argument('--domain', type=str, default='uci')
     parser.add_argument('--post_hiddens', type=str, default=None,) # default to be 1 hidden of node_dim
     parser.add_argument('--concat_states', action='store_true', default=False)
@@ -90,6 +91,7 @@ def main():
     parser.add_argument('--mode', type=str, default='train') # debug
     parser.add_argument('--data', type=str, default='concrete') # debug
     parser.add_argument('--use_wandb', action='store_true', default=False)
+    parser.add_argument('--device', type=str, default='')
     
     
     
@@ -118,9 +120,12 @@ def main():
 
     # select device
     if torch.cuda.is_available():
-        cuda = auto_select_gpu()
-        cuda = 0
-        device = torch.device('cuda:{}'.format(cuda))
+        if args.device == '':
+            cuda = auto_select_gpu()
+            cuda = 0
+            device = torch.device('cuda:{}'.format(cuda))
+        else:
+            device = torch.device(args.device)
     else:
         print('Using CPU')
         device = torch.device('cpu')
