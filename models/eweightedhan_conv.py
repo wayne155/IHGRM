@@ -71,10 +71,11 @@ class EWeightedHANConv(MessagePassing):
         self.q = nn.Parameter(torch.Tensor(1, out_channels))
         self.normalize_emb = normalize_emb
         self.proj = nn.ModuleDict()
+        self.edge_proj = nn.ModuleDict()
         # self.edge_proj = nn.ModuleDict()
         
         self.agg_lin_dict =  nn.ModuleDict()
-        self.edge_msg_lin =  nn.ModuleDict()
+        self.edge_att_lin =  nn.ModuleDict()
         
         for node_type, in_channels in self.in_channels.items():
             self.proj[node_type] = Linear(in_channels, out_channels)
@@ -87,8 +88,8 @@ class EWeightedHANConv(MessagePassing):
             self.lin_src[edge_type] = nn.Parameter(torch.Tensor(1, heads, dim))
             self.lin_dst[edge_type] = nn.Parameter(torch.Tensor(1, heads, dim))
             self.agg_lin_dict[edge_type] =  nn.Linear(out_channels +out_channels, out_channels)
-            self.edge_msg_lin[edge_type] =  nn.Linear(out_channels*2 +edge_dim, out_channels)
-            # self.edge_proj[edge_type] =  nn.Linear(edge_dim, out_channels)
+            self.edge_att_lin[edge_type] =  nn.Linear(out_channels*3, 1)
+            self.edge_proj[edge_type] =  nn.Linear(edge_dim, out_channels)
         
         self.act = get_activation(self.act_function)
         self.reset_parameters()
@@ -121,10 +122,11 @@ class EWeightedHANConv(MessagePassing):
         # Iterate over edge types:
         for edge_type, edge_index in edge_index_dict.items():
             edge_weight = edge_weight_dict[edge_type]
-            edge_weight = edge_weight.view(-1, H, self.edge_dim)
-                
+
             src_type, _, dst_type = edge_type
             edge_type = '__'.join(edge_type)
+            edge_weight = self.edge_proj[edge_type](edge_weight).view(-1, H, D)
+            
             lin_src = self.lin_src[edge_type]
             lin_dst = self.lin_dst[edge_type]
             x_src = x_node_dict[src_type]
@@ -150,12 +152,12 @@ class EWeightedHANConv(MessagePassing):
     def message(self, x_j: Tensor,x_i, alpha_i: Tensor, alpha_j: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
                 size_i: Optional[int],edge_weight:Optional[Tensor],edge_type:Optional[Tensor]) -> Tensor:
-        alpha = alpha_j + alpha_i
+        edge_att = self.edge_att_lin[edge_type](torch.concat((x_i ,x_j , edge_weight) , dim=-1)).sum(dim=-1)
+        alpha = (alpha_j + alpha_i) * edge_att
         alpha = F.leaky_relu(alpha, self.negative_slope)
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
-        msg = self.edge_msg_lin[edge_type](torch.cat((x_i, x_j,edge_weight),dim=-1))
-        out = msg * alpha.view(-1, self.heads, 1)
+        out = x_j * alpha.view(-1, self.heads, 1)
         return out.view(-1, self.out_channels)
 
     def __repr__(self) -> str:
