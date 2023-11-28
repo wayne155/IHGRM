@@ -27,7 +27,7 @@ def get_gnn(data, args):
                         args.node_dim, args.edge_dim, args.edge_mode,
                         model_types, args.dropout, args.gnn_activation,
                         args.concat_states, post_hiddens,
-                        norm_embs, args.aggr)
+                        norm_embs, args.aggr,args.argu_type)
     return model
 
 class GNNStack(torch.nn.Module):
@@ -36,13 +36,14 @@ class GNNStack(torch.nn.Module):
                 node_dim, edge_dim, edge_mode,
                 model_types, dropout, activation,
                 concat_states, node_post_mlp_hiddens,
-                normalize_embs, aggr
+                normalize_embs, aggr, argu_type="friend_network"
                 ):
         super(GNNStack, self).__init__()
         self.dropout = dropout
         self.activation = activation
         self.concat_states = concat_states
         self.model_types = model_types
+        self.argu_type = argu_type
         self.gnn_layer_num = len(model_types)
 
         # convs
@@ -57,9 +58,10 @@ class GNNStack(torch.nn.Module):
             self.node_post_mlp = self.build_node_post_mlp(node_dim, node_dim, node_post_mlp_hiddens, dropout, activation)
 
         self.edge_update_mlps = self.build_edge_update_mlps(node_dim, edge_input_dim, edge_dim, self.gnn_layer_num, activation)
-        
-        # self.sage = self.build_friend_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
-        self.weight_han = self.build_heterogeneous_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
+        if self.argu_type == 'friend_network':
+            self.sage = self.build_friend_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
+        elif self.argu_type == 'heterogeneous_network':
+            self.weight_han = self.build_heterogeneous_network_convs(node_dim,node_dim,activation,normalize_embs,aggr)
 
 
     def build_friend_network_convs(self, input_dim, output_dim, activation, normalize_embs, aggr):
@@ -71,7 +73,7 @@ class GNNStack(torch.nn.Module):
     def build_heterogeneous_network_convs(self, input_dim, output_dim, activation, normalize_embs, aggr):
         conv = WeightedHAN(input_dim,input_dim,output_dim, n_layers=1)
         return conv
-
+ 
     def build_node_post_mlp(self, input_dim, output_dim, hidden_dims, dropout, activation):
         if 0 in hidden_dims:
             return get_activation('none')
@@ -156,7 +158,14 @@ class GNNStack(torch.nn.Module):
         return x
 
     def F_augmentation(self, x, edge_attr, edge_index, num_obs):
-        x = self.weight_han(x, edge_attr, edge_index,num_obs)
+        if self.argu_type == 'friend_network':
+            x_sage = x[:num_obs]
+            for l, conv in enumerate(self.sage):
+                x_sage = conv(x_sage, edge_attr, edge_index)
+            x[:num_obs] = x_sage
+            return x
+        elif self.argu_type == 'heterogeneous_network':
+            x = self.weight_han(x, edge_attr, edge_index,num_obs)
         return x
 
 

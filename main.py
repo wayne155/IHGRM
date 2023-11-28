@@ -59,6 +59,7 @@ def main():
     # parser.add_argument('--model_types', type=str, default='EGSAGE_EGSAGE_EGSAGE')
     parser.add_argument('--domain', type=str, default='uci')
     parser.add_argument('--post_hiddens', type=str, default=None,) # default to be 1 hidden of node_dim
+    parser.add_argument('--argu_type', type=str, default='friend_network',) # default to be 1 hidden of node_dim
     parser.add_argument('--concat_states', action='store_true', default=False)
     parser.add_argument('--norm_embs', type=str, default=None,) # default to be all true
     parser.add_argument('--aggr', type=str, default='mean',)
@@ -121,8 +122,8 @@ def main():
     # select device
     if torch.cuda.is_available():
         if args.device == '':
-            cuda = auto_select_gpu()
             cuda = 0
+            cuda = auto_select_gpu()
             device = torch.device('cuda:{}'.format(cuda))
         else:
             device = torch.device(args.device)
